@@ -453,6 +453,8 @@
 	export_constant(MF_HIDEMOBHPBAR);
 	export_constant(MF_NOLOOT);
 	export_constant(MF_NOEXP);
+	export_constant(MF_PRIVATEAIRSHIP_SOURCE);
+	export_constant(MF_PRIVATEAIRSHIP_DESTINATION);
 
 	/* setcell types */
 	export_constant(CELL_WALKABLE);
@@ -4975,6 +4977,7 @@
 	export_constant(IG_SPECIAL_CHRISTMAS_BOX);
 	export_constant(IG_SANTA_GIFT);
 	export_constant(IG_PRIZEOFHERO);
+	export_constant(IG_PRIVATE_AIRSHIP);
 
 	/* unit stop walking */
 	export_constant(USW_NONE);
@@ -7268,6 +7271,14 @@
 	export_constant(BL_HOM);
 	export_constant(BL_MER);
 	export_constant(BL_ELEM);
+
+	/* skill damage mapflag types */
+	export_constant(SKILLDMG_PC);
+	export_constant(SKILLDMG_MOB);
+	export_constant(SKILLDMG_BOSS);
+	export_constant(SKILLDMG_OTHER);
+	export_constant(SKILLDMG_MAX);
+	export_constant(SKILLDMG_CASTER);
 
 	#undef export_constant
 	#undef export_constant2

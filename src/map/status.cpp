@@ -113,7 +113,7 @@ static unsigned int status_calc_maxhpsp_pc(struct map_session_data* sd, unsigned
 static int status_get_sc_interval(enum sc_type type);
 
 static bool status_change_isDisabledOnMap_(sc_type type, bool mapIsVS, bool mapIsPVP, bool mapIsGVG, bool mapIsBG, unsigned int mapZone, bool mapIsTE);
-#define status_change_isDisabledOnMap(type, m) ( status_change_isDisabledOnMap_((type), map_flag_vs2((m)), map_getmapflag((m), MF_PVP) != 0, map_flag_gvg2_no_te((m)), map_getmapflag((m), MF_BATTLEGROUND) != 0, (map[(m)].zone << 3) != 0, map_flag_gvg2_te((m))) )
+#define status_change_isDisabledOnMap(type, m) ( status_change_isDisabledOnMap_((type), map_flag_vs2((m)), map_getmapflag((m), MF_PVP) != 0, map_flag_gvg2_no_te((m)), map_getmapflag((m), MF_BATTLEGROUND) != 0, (map_getmapdata(m)->zone << 3) != 0, map_flag_gvg2_te((m))) )
 
 /**
  * Returns the status change associated with a skill.
@@ -2141,9 +2141,6 @@ bool status_check_skilluse(struct block_list *src, struct block_list *target, ui
 			return false;
 		}
 
-		if (flag == 1 && sc->data[SC_CURSEDCIRCLE_TARGET] && skill_id == MO_ABSORBSPIRITS) // Absorb Spirits fails to go through
-			return false;
-
 		if (skill_id != RK_REFRESH && skill_id != SU_GROOMING && sc->opt1 && sc->opt1 != OPT1_BURNING && skill_id != SR_GENTLETOUCH_CURE) { // Stuned/Frozen/etc
 			if (flag != 1) // Can't cast, casted stuff can't damage.
 				return false;
@@ -2801,10 +2798,11 @@ int status_calc_mob_(struct mob_data* md, enum e_status_calc_opt opt)
 
 	if(flag&4) { // Strengthen Guardians - custom value +10% / lv
 		struct guild_castle *gc;
+		struct map_data *mapdata = map_getmapdata(md->bl.m);
 
-		gc=guild_mapname2gc(map[md->bl.m].name);
+		gc=guild_mapname2gc(mapdata->name);
 		if (!gc)
-			ShowError("status_calc_mob: No castle set at map %s\n", map[md->bl.m].name);
+			ShowError("status_calc_mob: No castle set at map %s\n", mapdata->name);
 		else if(gc->castle_id < 24 || md->mob_id == MOBID_EMPERIUM) {
 #ifdef RENEWAL
 			status->max_hp += 50 * (gc->defense / 5);
@@ -3330,7 +3328,7 @@ bool status_calc_cart_weight(struct map_session_data *sd, enum e_status_calc_wei
  * @param opt: Whether it is first calc (login) or not
  * @return (-1) for too many recursive calls, (1) recursive call, (0) success
  */
-int status_calc_pc_(struct map_session_data* sd, enum e_status_calc_opt opt)
+int status_calc_pc_sub(struct map_session_data* sd, enum e_status_calc_opt opt)
 {
 	static int calculating = 0; ///< Check for recursive call preemption. [Skotlex]
 	struct status_data *base_status; ///< Pointer to the player's base status
@@ -4231,6 +4229,24 @@ int status_calc_pc_(struct map_session_data* sd, enum e_status_calc_opt opt)
 	calculating = 0;
 
 	return 0;
+}
+
+/// Intermediate function since C++ does not have a try-finally syntax
+int status_calc_pc_( struct map_session_data* sd, enum e_status_calc_opt opt ){
+	// Save the old script the player was attached to
+	struct script_state* previous_st = sd->st;
+
+	// Store the return value of the original function
+	int ret = status_calc_pc_sub( sd, opt );
+
+	// If an old script is present
+	if( previous_st ){
+		// Reattach the player to it, so that the limitations of that script kick back in
+		script_attach_state( previous_st );
+	}
+
+	// Return the original return value
+	return ret;
 }
 
 /**
@@ -14355,7 +14371,7 @@ void status_change_clear_onChangeMap(struct block_list *bl, struct status_change
 		bool mapIsGVG = map_flag_gvg2_no_te(bl->m);
 		bool mapIsBG = map_getmapflag(bl->m, MF_BATTLEGROUND) != 0;
 		bool mapIsTE = map_flag_gvg2_te(bl->m);
-		unsigned int mapZone = map[bl->m].zone << 3;
+		unsigned int mapZone = map_getmapdata(bl->m)->zone << 3;
 
 		for (i = 0; i < SC_MAX; i++) {
 			if (!sc->data[i] || !SCDisabled[i])

@@ -3404,7 +3404,7 @@ void clif_updatestatus(struct map_session_data *sd,int type)
 			}
 			break;
 		case SP_HP:
-			if( map[sd->bl.m].hpmeter_visible ){
+			if( map_getmapdata(sd->bl.m)->hpmeter_visible ){
 				clif_hpmeter(sd);
 			}
 			if( !battle_config.party_hp_mode && sd->status.party_id ){
@@ -7706,6 +7706,22 @@ void clif_party_hp(struct map_session_data *sd)
 	clif_send(buf,packet_len(cmd),&sd->bl,PARTY_AREA_WOS);
 }
 
+/// Notifies the party members of a character's death or revival.
+/// 0AB2 <GID>.L <dead>.B
+void clif_party_dead( struct map_session_data *sd ){
+#if PACKETVER >= 20170502
+	unsigned char buf[7];
+
+	nullpo_retv(sd);
+
+	WBUFW(buf, 0) = 0xab2;
+	WBUFL(buf, 2) = sd->status.account_id;
+	WBUFB(buf, 6) = pc_isdead(sd);
+
+	clif_send(buf, packet_len(0xab2), &sd->bl, PARTY);
+#endif
+}
+
 /// Updates the job and level of a party member
 /// 0abd <account id>.L <job>.W <level>.W
 void clif_party_job_and_level(struct map_session_data *sd){
@@ -10308,10 +10324,12 @@ void clif_parse_LoadEndAck(int fd,struct map_session_data *sd)
 			pc_setinvincibletimer(sd,battle_config.pc_invincible_time);
 	}
 
-	if( map[sd->bl.m].users++ == 0 && battle_config.dynamic_mobs )
+	struct map_data *mapdata = map_getmapdata(sd->bl.m);
+
+	if( mapdata->users++ == 0 && battle_config.dynamic_mobs )
 		map_spawnmobs(sd->bl.m);
 	if( !pc_isinvisible(sd) ) { // increment the number of pvp players on the map
-		map[sd->bl.m].users_pvp++;
+		mapdata->users_pvp++;
 	}
 	sd->state.debug_remove_map = 0; // temporary state to track double remove_map's [FlavioJS]
 
@@ -10499,9 +10517,10 @@ void clif_parse_LoadEndAck(int fd,struct map_session_data *sd)
 			guild_notice = false; // Do not display it twice
 		}
 
-		if( (battle_config.bg_flee_penalty != 100 || battle_config.gvg_flee_penalty != 100) &&
-			(map_flag_gvg(sd->state.pmap) || map_flag_gvg(sd->bl.m) || map_getmapflag(sd->state.pmap, MF_BATTLEGROUND) || map_getmapflag(sd->bl.m, MF_BATTLEGROUND)) )
-			status_calc_bl(&sd->bl, SCB_FLEE); //Refresh flee penalty
+		if (battle_config.bg_flee_penalty != 100 || battle_config.gvg_flee_penalty != 100) {
+			if ((sd->state.pmap != 0 && map_getmapdata(sd->state.pmap) != nullptr && (map_flag_gvg(sd->state.pmap) || map_getmapflag(sd->state.pmap, MF_BATTLEGROUND))) || (mapdata != nullptr && (map_flag_gvg(sd->bl.m) || map_getmapflag(sd->bl.m, MF_BATTLEGROUND))))
+				status_calc_bl(&sd->bl, SCB_FLEE); //Refresh flee penalty
+		}
 
 		if( night_flag && map_getmapflag(sd->bl.m, MF_NIGHTENABLED) )
 		{	//Display night.
@@ -10532,7 +10551,7 @@ void clif_parse_LoadEndAck(int fd,struct map_session_data *sd)
 		}
 
 		if( pc_has_permission(sd,PC_PERM_VIEW_HPMETER) ) {
-			map[sd->bl.m].hpmeter_visible++;
+			mapdata->hpmeter_visible++;
 			sd->state.hpmeter_visible = 1;
 		}
 
@@ -10553,7 +10572,7 @@ void clif_parse_LoadEndAck(int fd,struct map_session_data *sd)
 #endif
 
 		// Instances do not need their own channels
-		if( channel_config.map_tmpl.name[0] && (channel_config.map_tmpl.opt&CHAN_OPT_AUTOJOIN) && !map_getmapflag(sd->bl.m,MF_NOMAPCHANNELAUTOJOIN) && !map[sd->bl.m].instance_id )
+		if( channel_config.map_tmpl.name[0] && (channel_config.map_tmpl.opt&CHAN_OPT_AUTOJOIN) && !map_getmapflag(sd->bl.m,MF_NOMAPCHANNELAUTOJOIN) && !mapdata->instance_id )
 			channel_mjoin(sd); //join new map
 
 		clif_pk_mode_message(sd);
@@ -11542,14 +11561,14 @@ void clif_parse_NpcClicked(int fd,struct map_session_data *sd)
 		clif_clearunit_area(&sd->bl,CLR_DEAD);
 		return;
 	}
+
+	if( pc_cant_act2(sd) || sd->npc_id || pc_hasprogress( sd, WIP_DISABLE_NPC ) ){
 #ifdef RENEWAL
-	if (sd->npc_id || pc_hasprogress(sd, WIP_DISABLE_NPC)) {
-		clif_msg(sd, WORK_IN_PROGRESS);
+		clif_msg( sd, WORK_IN_PROGRESS );
+#endif
 		return;
 	}
-#endif
-	if (pc_cant_act2(sd) || sd->npc_id)
-		return;
+
 	if( sd->state.mail_writing )
 		return;
 
@@ -12173,16 +12192,13 @@ void clif_parse_UseSkillToId(int fd, struct map_session_data *sd)
 	if (battle_config.idletime_option&IDLE_USESKILLTOID)
 		sd->idletime = last_tick;
 
-	if (sd->npc_id) {
+	if( sd->npc_id ){
+		if( pc_hasprogress( sd, WIP_DISABLE_SKILLITEM ) || !sd->npc_item_flag || !( inf & INF_SELF_SKILL ) ){
 #ifdef RENEWAL
-		if (pc_hasprogress(sd, WIP_DISABLE_SKILLITEM)) {
-			clif_msg(sd, WORK_IN_PROGRESS);
+			clif_msg( sd, WORK_IN_PROGRESS );
+#endif
 			return;
 		}
-#else
-		if (!sd->npc_item_flag || !(inf&INF_SELF_SKILL))
-			return;
-#endif
 	}
 
 	if( (pc_cant_act2(sd) || sd->chatID) && skill_id != RK_REFRESH && !(skill_id == SR_GENTLETOUCH_CURE &&
@@ -12270,12 +12286,12 @@ static void clif_parse_UseSkillToPosSub(int fd, struct map_session_data *sd, uin
 		return;
 	}
 
+	if( pc_hasprogress( sd, WIP_DISABLE_SKILLITEM ) ){
 #ifdef RENEWAL
-	if (pc_hasprogress(sd, WIP_DISABLE_SKILLITEM)) {
-		clif_msg(sd, WORK_IN_PROGRESS);
+		clif_msg( sd, WORK_IN_PROGRESS );
+#endif
 		return;
 	}
-#endif
 
 	//Whether skill fails or not is irrelevant, the char ain't idle. [Skotlex]
 	if (battle_config.idletime_option&IDLE_USESKILLTOPOS)
@@ -17286,14 +17302,15 @@ void clif_bg_updatescore(int16 m)
 {
 	struct block_list bl;
 	unsigned char buf[6];
+	struct map_data *mapdata = map_getmapdata(m);
 
 	bl.id = 0;
 	bl.type = BL_NUL;
 	bl.m = m;
 
 	WBUFW(buf,0) = 0x2de;
-	WBUFW(buf,2) = map[m].bgscore_lion;
-	WBUFW(buf,4) = map[m].bgscore_eagle;
+	WBUFW(buf,2) = mapdata->bgscore_lion;
+	WBUFW(buf,4) = mapdata->bgscore_eagle;
 	clif_send(buf,packet_len(0x2de),&bl,ALL_SAMEMAP);
 }
 
@@ -17303,10 +17320,12 @@ void clif_bg_updatescore_single(struct map_session_data *sd)
 	nullpo_retv(sd);
 	fd = sd->fd;
 
+	struct map_data *mapdata = map_getmapdata(sd->bl.m);
+
 	WFIFOHEAD(fd,packet_len(0x2de));
 	WFIFOW(fd,0) = 0x2de;
-	WFIFOW(fd,2) = map[sd->bl.m].bgscore_lion;
-	WFIFOW(fd,4) = map[sd->bl.m].bgscore_eagle;
+	WFIFOW(fd,2) = mapdata->bgscore_lion;
+	WFIFOW(fd,4) = mapdata->bgscore_eagle;
 	WFIFOSET(fd,packet_len(0x2de));
 }
 
@@ -20366,6 +20385,111 @@ void clif_weight_limit( struct map_session_data* sd ){
 	WFIFOL(fd, 2) = battle_config.natural_heal_weight_rate;
 #endif
 	WFIFOSET(fd, packet_len(0xADE));
+#endif
+}
+
+enum e_private_airship_response : uint32{
+	PRIVATEAIRSHIP_OK,
+	PRIVATEAIRSHIP_RETRY,
+	PRIVATEAIRSHIP_ITEM_NOT_ENOUGH,
+	PRIVATEAIRSHIP_DESTINATION_MAP_INVALID,
+	PRIVATEAIRSHIP_SOURCE_MAP_INVALID,
+	PRIVATEAIRSHIP_ITEM_UNAVAILABLE
+};
+
+/// Send out the response to a private airship request
+/// 0A4A <response>.L
+void clif_private_airship_response( struct map_session_data* sd, enum e_private_airship_response response ){
+#if PACKETVER >= 20180321
+	nullpo_retv( sd );
+
+	int fd = sd->fd;
+
+	WFIFOHEAD( fd, packet_len( 0xA4A ) );
+	WFIFOW( fd, 0 ) = 0xA4A;
+	WFIFOL( fd, 2 ) = response;
+	WFIFOSET( fd, packet_len( 0xA4A ) );
+#endif
+}
+
+/// Parses a request for a private airship
+/// 0A49 <mapname>.16B <itemid>.W
+void clif_parse_private_airship_request( int fd, struct map_session_data* sd ){
+#if PACKETVER >= 20180321
+	// Check if the feature is enabled
+	if( !battle_config.feature_privateairship ){
+		clif_messagecolor( &sd->bl, color_table[COLOR_RED], msg_txt( sd, 792 ), false, SELF ); // The private airship system is disabled.
+		return;
+	}
+
+	// Check if the player is allowed to warp from the source map
+	if( !map_getmapflag( sd->bl.m, MF_PRIVATEAIRSHIP_SOURCE ) ){
+		clif_private_airship_response( sd, PRIVATEAIRSHIP_SOURCE_MAP_INVALID );
+		return;
+	}
+
+	char mapname[MAP_NAME_LENGTH_EXT];
+
+	safestrncpy( mapname, RFIFOCP( fd, 2 ), MAP_NAME_LENGTH_EXT );
+
+	int16 mapindex = mapindex_name2id( mapname );
+
+	// Check if we know the mapname
+	if( mapindex < 0 ){
+		clif_private_airship_response( sd, PRIVATEAIRSHIP_DESTINATION_MAP_INVALID );
+		return;
+	}
+
+	int16 mapid = map_mapindex2mapid( mapindex );
+
+	// Check if the map is available on this server
+	if( mapid < 0 ){
+		// TODO: add multi map-server support, cant validate the mapflags of the other server
+		return;
+	}
+
+	// Check if the player tried to warp to the map he is on
+	if( sd->bl.m == mapid ){
+		// This is blocked by the client, but just to be sure
+		return;
+	}
+
+	// This can only be a hack, so we prevent it
+	if( map_getmapdata( mapid )->instance_id ){
+		// Ignore requests to warp directly into a running instance
+		return;
+	}
+
+	// Check if the player is allowed to warp to the target map
+	if( !map_getmapflag( mapid, MF_PRIVATEAIRSHIP_DESTINATION ) ){
+		clif_private_airship_response( sd, PRIVATEAIRSHIP_DESTINATION_MAP_INVALID );
+		return;
+	}
+
+	uint16 item_id = RFIFOW( fd, 2 + MAP_NAME_LENGTH_EXT );
+
+	// Check if the item sent by the client is known to us
+	if( !itemdb_group_item_exists(IG_PRIVATE_AIRSHIP, item_id) ){
+		clif_private_airship_response( sd, PRIVATEAIRSHIP_ITEM_UNAVAILABLE );
+		return;
+	}
+
+	int idx = pc_search_inventory( sd, item_id );
+
+	// Check if the player has the item at all
+	if( idx < 0 ){
+		clif_private_airship_response( sd, PRIVATEAIRSHIP_ITEM_NOT_ENOUGH );
+		return;
+	}
+
+	// Delete the chosen item
+	if( pc_delitem( sd, idx, 1, 0, 0, LOG_TYPE_PRIVATE_AIRSHIP ) ){
+		clif_private_airship_response( sd, PRIVATEAIRSHIP_RETRY );
+		return;
+	}
+
+	// Warp the player to a random spot on the destination map
+	pc_setpos( sd, mapindex, 0, 0, CLR_TELEPORT );
 #endif
 }
 

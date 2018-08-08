@@ -700,7 +700,7 @@ bool skill_isNotOk(uint16 skill_id, struct map_session_data *sd)
 		(map_flag_gvg2_no_te(m) && skill_nocast&4) ||
 		(map_getmapflag(m, MF_BATTLEGROUND) && skill_nocast&8) ||
 		(map_flag_gvg2_te(m) && skill_nocast&16) || // WOE:TE
-		(map_getmapflag(m, MF_RESTRICTED) && map[m].zone && skill_nocast&(8*map[m].zone)) ){
+		(map_getmapflag(m, MF_RESTRICTED) && map_getmapdata(m)->zone && skill_nocast&(8*map_getmapdata(m)->zone)) ){
 			clif_msg(sd, SKILL_CANT_USE_AREA); // This skill cannot be used within this area
 			return true;
 	}
@@ -13076,9 +13076,10 @@ struct skill_unit_group *skill_unitsetting(struct block_list *src, uint16 skill_
 		int unit_val1 = skill_lv;
 		int unit_val2 = 0;
 		int alive = 1;
+		struct map_data *mapdata = map_getmapdata(src->m);
 
 		// are the coordinates out of range?
-		if( ux <= 0 || uy <= 0 || ux >= map[src->m].xs || uy >= map[src->m].ys ){
+		if( ux <= 0 || uy <= 0 || ux >= mapdata->xs || uy >= mapdata->ys ){
 			continue;
 		}
 
@@ -21455,7 +21456,6 @@ static bool skill_parse_row_changematerialdb(char* split[], int columns, int cur
 	return true;
 }
 
-#ifdef ADJUST_SKILL_DAMAGE
 /**
  * Reads skill damage adjustment
  * @author [Lilith]
@@ -21472,17 +21472,16 @@ static bool skill_parse_row_skilldamage(char* split[], int columns, int current)
 
 	id = skill_db_isset(id, __FUNCTION__);
 
-	memset(&skill_db[id]->damage,0,sizeof(struct s_skill_damage));
+	skill_db[id]->damage = {};
 	skill_db[id]->damage.caster |= atoi(split[1]);
 	skill_db[id]->damage.map |= atoi(split[2]);
 
-	for(int offset = 3, int i = 0; i < SKILLDMG_MAX && offset < columns; i++, offset++ ){
+	for(int offset = 3, i = 0; i < SKILLDMG_MAX && offset < columns; i++, offset++ ){
 		skill_db[id]->damage.rate[i] = cap_value(atoi(split[offset]), -100, INT_MAX);
 	}
 
 	return true;
 }
-#endif
 
 /**
  * Init dummy skill db also init Skill DB allocation
@@ -21590,9 +21589,8 @@ static void skill_readdb(void)
 		sv_readdb(dbsubpath1, "skill_improvise_db.txt"      , ',',   2,  2, MAX_SKILL_IMPROVISE_DB, skill_parse_row_improvisedb, i > 0);
 		sv_readdb(dbsubpath1, "skill_changematerial_db.txt" , ',',   5,  5+2*MAX_SKILL_CHANGEMATERIAL_SET, MAX_SKILL_CHANGEMATERIAL_DB, skill_parse_row_changematerialdb, i > 0);
 		sv_readdb(dbsubpath1, "skill_nonearnpc_db.txt"      , ',',   2,  3, -1, skill_parse_row_nonearnpcrangedb, i > 0);
-#ifdef ADJUST_SKILL_DAMAGE
 		sv_readdb(dbsubpath1, "skill_damage_db.txt"         , ',',   4,  3+SKILLDMG_MAX, -1, skill_parse_row_skilldamage, i > 0);
-#endif
+
 		aFree(dbsubpath1);
 		aFree(dbsubpath2);
 	}
